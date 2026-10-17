@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import { z } from "zod";
-import { supabase } from "./supabase";
 
 export const CATEGORIES = [
   "Electronics",
@@ -141,148 +140,46 @@ function notify() {
   listeners.forEach((l) => l());
 }
 
-/* ---------- Supabase persistence ---------- */
-const TABLE = "items";
-
-export async function fetchItems(): Promise<Item[]> {
-  const { data, error } = await supabase
-    .from(TABLE)
-    .select("*")
-    .order("created_at", { ascending: false });
-  if (error) throw error;
-  return (data as ItemRow[]).map(rowToItem);
-}
-
-export async function createItem(input: ItemInput): Promise<Item> {
-  const { data, error } = await supabase
-    .from(TABLE)
-    .insert(itemToRow(input))
-    .select("*")
-    .maybeSingle();
-  if (error) throw error;
-  if (!data) throw new Error("Could not create the item — please try again.");
-  const item = rowToItem(data as ItemRow);
-  notify();
-  return item;
-}
-
-export async function updateItem(
-  id: string,
-  patch: Partial<Omit<Item, "id" | "createdAt">>,
-): Promise<Item> {
-  const row: Record<string, unknown> = { updated_at: new Date().toISOString() };
-  if (patch.title !== undefined) row.title = patch.title;
-  if (patch.description !== undefined) row.description = patch.description;
-  if (patch.category !== undefined) row.category = patch.category;
-  if (patch.location !== undefined) row.location = patch.location;
-  if (patch.dateOccurred !== undefined) row.date_occurred = patch.dateOccurred;
-  if (patch.image !== undefined) row.image = patch.image;
-  if (patch.type !== undefined) {
-    row.type = patch.type;
-    if (patch.status === undefined) row.status = patch.type;
-  }
-  if (patch.status !== undefined) row.status = patch.status;
-  if (patch.contactInstructions !== undefined) row.contact_instructions = patch.contactInstructions;
-
-  const { data, error } = await supabase
-    .from(TABLE)
-    .update(row)
-    .eq("id", id)
-    .select("*")
-    .maybeSingle();
-  if (error) throw error;
-  if (!data) throw new Error("Item not found");
-  const item = rowToItem(data as ItemRow);
-  notify();
-  return item;
-}
-
-export async function deleteItem(id: string): Promise<void> {
-  const { error } = await supabase.from(TABLE).delete().eq("id", id);
-  if (error) throw error;
-  notify();
-}
-
-/** Seed demo items if the table is empty. */
-async function seedIfEmpty(): Promise<void> {
-  const { count, error } = await supabase
-    .from(TABLE)
-    .select("*", { count: "exact", head: true });
-  if (error) throw error;
-  if (count && count > 0) return;
-
-  const demoRows: Omit<ItemRow, "id" | "created_at" | "updated_at">[] = [
-    { title: "Blue steel water bottle", description: "32oz insulated bottle, navy blue with a mountain sticker and a dent near the base.", category: "Water Bottles", location: "Main Library", date_occurred: todayISO(), image: null, type: "found", status: "found", contact_instructions: "Handed in at the Library front desk — ask staff for the lost property box.", is_demo: true },
-    { title: "TI-84 Plus calculator", description: "Black graphing calculator in a grey slide case. Initials scratched on the back.", category: "Electronics", location: "Science Building", date_occurred: daysAgoISO(1), image: null, type: "lost", status: "lost", contact_instructions: "Leave a note with the Science Building reception desk, room S-101.", is_demo: true },
-    { title: "Green canvas backpack", description: "Forest green backpack with a broken left zipper pull and a keychain carabiner.", category: "Bags", location: "Student Union", date_occurred: daysAgoISO(2), image: null, type: "found", status: "found", contact_instructions: "At the Student Union info desk. Describe the contents to claim it.", is_demo: true },
-    { title: "Spiral notebook — Organic Chem", description: "Yellow 5-subject notebook with handwritten chemistry notes. Very important for finals!", category: "Stationery", location: "Lecture Hall B", date_occurred: daysAgoISO(3), image: null, type: "lost", status: "lost", contact_instructions: "Drop it at the Chemistry department office; they'll contact me via the course portal.", is_demo: true },
-    { title: "Set of keys with red lanyard", description: "Three keys on a red university lanyard with a small bottle-opener charm.", category: "Accessories", location: "Gym", date_occurred: daysAgoISO(5), image: null, type: "found", status: "returned", contact_instructions: "Collected from the Gym front desk.", is_demo: true },
-    { title: "Grey university hoodie", description: "Medium grey pullover hoodie, faded logo, left on a bench.", category: "Clothing", location: "Cafeteria", date_occurred: daysAgoISO(6), image: null, type: "lost", status: "lost", contact_instructions: "Please hand to cafeteria staff — I check in daily at lunch.", is_demo: true },
-  ];
-
-  const { error: insertError } = await supabase.from(TABLE).insert(demoRows);
-  if (insertError) throw insertError;
-}
-
+/* ---------- In-memory demo persistence ---------- */
 function daysAgoISO(n: number): string {
   const d = new Date();
   d.setDate(d.getDate() - n);
   return d.toISOString().slice(0, 10);
 }
 
-export function resetDemo(): void {
-  (async () => {
-    await supabase.from(TABLE).delete().neq("id", "00000000-0000-0000-0000-000000000000");
-    await seedIfEmpty();
-    notify();
-  })();
-}
+const demoItems: Item[] = [
+  ["Blue steel water bottle", "32oz insulated bottle, navy blue with a mountain sticker and a dent near the base.", "Water Bottles", "Main Library", 0, "found", "Handed in at the Library front desk — ask staff for the lost property box."],
+  ["TI-84 Plus calculator", "Black graphing calculator in a grey slide case. Initials scratched on the back.", "Electronics", "Science Building", 1, "lost", "Leave a note with the Science Building reception desk, room S-101."],
+  ["Green canvas backpack", "Forest green backpack with a broken left zipper pull and a keychain carabiner.", "Bags", "Student Union", 2, "found", "At the Student Union info desk. Describe the contents to claim it."],
+  ["Spiral notebook — Organic Chem", "Yellow 5-subject notebook with handwritten chemistry notes.", "Stationery", "Lecture Hall B", 3, "lost", "Drop it at the Chemistry department office."],
+  ["Set of keys with red lanyard", "Three keys on a red university lanyard with a bottle-opener charm.", "Accessories", "Gym", 5, "returned", "Collected from the Gym front desk."],
+  ["Grey university hoodie", "Medium grey pullover hoodie, faded logo, left on a bench.", "Clothing", "Cafeteria", 6, "lost", "Please hand to cafeteria staff."],
+].map(([title, description, category, location, days, type, contactInstructions], index) => {
+  const timestamp = new Date(Date.now() - Number(days) * 86400000 - index * 60000).toISOString();
+  return { id: `demo-${index + 1}`, title: String(title), description: String(description), category: category as Category, location: String(location), dateOccurred: daysAgoISO(Number(days)), image: null, type: type as ItemType, status: type as ItemStatus, contactInstructions: String(contactInstructions), createdAt: timestamp, updatedAt: timestamp, isDemo: true };
+});
+let store: Item[] = [...demoItems];
 
-/** null while loading, Error if the fetch failed. */
+export async function fetchItems(): Promise<Item[]> { return [...store]; }
+export async function createItem(input: ItemInput): Promise<Item> {
+  const now = new Date().toISOString();
+  const item: Item = { ...input, id: crypto.randomUUID(), status: input.type, createdAt: now, updatedAt: now };
+  store = [item, ...store]; notify(); return item;
+}
+export async function updateItem(id: string, patch: Partial<Omit<Item, "id" | "createdAt">>): Promise<Item> {
+  const existing = store.find((item) => item.id === id);
+  if (!existing) throw new Error("Item not found");
+  const item = { ...existing, ...patch, updatedAt: new Date().toISOString() };
+  store = store.map((entry) => entry.id === id ? item : entry); notify(); return item;
+}
+export async function deleteItem(id: string): Promise<void> { store = store.filter((item) => item.id !== id); notify(); }
+export function resetDemo(): void { store = [...demoItems]; notify(); }
+
 export function useItems(): { items: Item[] | null; error: Error | null; loading: boolean } {
   const [items, setItems] = useState<Item[] | null>(null);
   const [error, setError] = useState<Error | null>(null);
-
-  const refresh = useCallback(async () => {
-    try {
-      const data = await fetchItems();
-      setItems(data);
-      setError(null);
-    } catch (e) {
-      setError(e as Error);
-    }
-  }, []);
-
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        await seedIfEmpty();
-        const data = await fetchItems();
-        if (mounted) {
-          setItems(data);
-          setError(null);
-        }
-      } catch (e) {
-        if (mounted) setError(e as Error);
-      }
-    })();
-
-    const l = () => { refresh(); };
-    listeners.add(l);
-
-    const channel = supabase
-      .channel("items-changes")
-      .on("postgres_changes", { event: "*", schema: "public", table: TABLE }, () => refresh())
-      .subscribe();
-
-    return () => {
-      mounted = false;
-      listeners.delete(l);
-      supabase.removeChannel(channel);
-    };
-  }, [refresh]);
-
+  const refresh = useCallback(async () => { setItems(await fetchItems()); setError(null); }, []);
+  useEffect(() => { void refresh(); const listener = () => void refresh(); listeners.add(listener); return () => listeners.delete(listener); }, [refresh]);
   return { items, error, loading: items === null && error === null };
 }
 
